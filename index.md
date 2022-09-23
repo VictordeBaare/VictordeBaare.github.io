@@ -19,6 +19,6 @@ SCA is used to scan your solution for possible security vulnerabilities in your 
 
 Mend and Snyk can be integrated in your current DevOps process. Whereas GitLab and GitGuardian are full platforms which offer these services.
 
-Now with adding SCA is not enough. Integrating it in your development process is crucial. These tools can highlight issues, but the development team needs to resolve them. I would advice to add the scans to your pull request process. Similar to a gated build add the SCA check to your pipeline. With this you are ahead of the issues, but we arent there yet. We also need to scan existing application which might not deploy very often anymore. So a nightly build is also crucial to get informed over new security issues in existing packages!
+Now adding SCA is not enough. Integrating it in your development process is crucial. These tools can highlight issues, but the development team needs to resolve them. I would advice to add the scans to your pull request process. Similar to a gated build, add the SCA check to your pipeline. With this you are ahead of some issues, but we aren't there yet. We also need to scan existing application which might not deploy very often anymore. So a nightly build is also crucial to get informed over new security issues in existing packages!
 
 If you combine these two pipelines with a team which is eager to fix these kind of issues then you already tackled a set of security issues and made your software a bit more secure.
