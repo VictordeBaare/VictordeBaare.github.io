@@ -261,7 +261,7 @@ public sealed override async Task ComputeRefactoringsAsync(CodeRefactoringContex
 }
 ```
 
-From here on out we can start adding our custom logic. Because we are making an rather dumb mapping method I added the logic to check if its a method with a return type and a single input parameter. If thats the case we can go further to create a mapping code action and register it to Visual Studio!
+From here on out we can start adding our custom logic. Because we are making a rather dumb mapping method I added the logic to check if its a method with a return type and a single input parameter. If thats the case we can go further to create a mapping code action and register it to Visual Studio!
 
 The mapping itself contains a bit more complex logic. Because we are trying to create a mapper there is the potential for some recursion. For example it is possible that the root object contains a property which itself is a complex object which needs to be mapped. For this reason we create an object to hold these extra statements.
 Now for the next step we check what type the returntype and input type is. For example is it an Enum, is it a list or is it a standard complex object. 
@@ -273,3 +273,31 @@ var sourceProperties = source.GetMembers().Where(x => !x.IsStatic && !x.IsImplic
 
 In this case its important that the members we are working with are PropertySymbols and Public settable. The next step is creating the mapping, often there are two ways just use the public setters or use an constructor. For now I ignored the combination of these two flavours, to keep the code a bit more readable. 
 For now lets go with the flavour of setting the properties directly. The syntax of Roslyn dictates that the first step that we must do is declare the new object syntax. Using the target ITypeSymbol we can call the SyntaxGenerator to create a type expression, and with that create the [ObjectCreationExpression](https://learn.microsoft.com/en-us/dotnet/api/microsoft.codeanalysis.csharp.syntaxfactory.objectcreationexpression?view=roslyn-dotnet-4.3.0#microsoft-codeanalysis-csharp-syntaxfactory-objectcreationexpression(microsoft-codeanalysis-syntaxtoken-microsoft-codeanalysis-csharp-syntax-typesyntax-microsoft-codeanalysis-csharp-syntax-argumentlistsyntax-microsoft-codeanalysis-csharp-syntax-initializerexpressionsyntax)) on the [SyntaxFactory](https://learn.microsoft.com/en-us/dotnet/api/microsoft.codeanalysis.csharp.syntaxfactory?view=roslyn-dotnet-4.3.0). This step can also be done at a later stage but I prefer to do it in the beginning. Now the next step is creating the actual mapping. To do this we get the target member properties the same way we got the source properties. Now we try to match the target and the source properties. 
+For this matching I decided to make a dedicated interface to resolve this. This way we can test it without much issues if we decide to update the matching.
+Now that we got a combination of a Target and Source property we can start setting the target with the source. The first thing we must do is check if the target has a SetMethod, the next part is checking if the source might be nullable and the target might not be. For this we add the following logic:
+```
+//It should not be readonly, readonly objects cannot be set.
+if (matchedProp != null && targetProperty.SetMethod != null)
+{
+    //Create the MemberAccess expression for example: source.Property
+    var memberAccessExpression = (ExpressionSyntax)syntaxGenerator.MemberAccessExpression(expression, matchedProp.Name);
+
+    //If the target is not nullable and the source is nullable then add the safety check with an argumentnull exception
+    if (matchedProp.Type.IsNullable() && !targetProperty.Type.IsNullable())
+    {
+        //Create an ?? operator. The SyntaxKind is used for that.
+        memberAccessExpression = SyntaxFactory.BinaryExpression(SyntaxKind.CoalesceExpression,
+            memberAccessExpression,
+            SyntaxFactory.ThrowExpression(ThrowAgrumentNullExpression(memberAccessExpression)));
+    }
+```
+The next check that we must perform is if the properties are both simple types and not a complex object, because if it is a complex object we will start from the beginning again.
+We will keep repeating this logic for the possible combinations, for example lists.
+
+When we reach the end of this whole process we would like to print the code block that we created. But we would like to make sure that it is formatted correctly.
+To ensure this we will add LeadingTrivia to the expression that we created.
+```
+var newBlock = SyntaxFactory.Block(statement.Root).WithAdditionalAnnotations(Formatter.Annotation);
+```
+
+For the full code example which includes comments on how the code works please check out the GitHub repo: https://github.com/VictordeBaare/Capsicum
