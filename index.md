@@ -185,3 +185,91 @@ The part to focus on in these examples is the [|Map|] the [| |] notation tells t
 ```
 
 In the after mapping code example you can see the result that is expected. With this we finished the necessary resources to easily create a code refactoring tool for Roslyn. The next step would be creating the implementation itself.
+
+---
+
+# Code refactoring made easy with Roslyn Part 2
+
+In the first part of this tutorial we created a solution in which we can easily develop a Roslyn Code Refactoring tool.
+The next step is to actually develop the tool itself. For this I decided to create a mapping tool. Nothing fancy you start with defining the method itself and continue from there. For example:
+```
+    public static class Mapper
+    {
+        public static Target [|Map|](Source source)
+        {
+            throw new NotImplementedException();
+        }
+    }
+```
+You dont want to write the mapping code. You just want to create the method with the return object and the input parameter.
+The mapping itself should be added by Roslyn when you decide to do so. The following mapping output should be something like:
+
+```
+public static class Mapper
+    {
+        public static Target Map(Source source)
+        {
+            //source.TestChild: UnmappedProp could not be matched
+            //sourcechildItem: UnmappedProp could not be matched
+            //source: UnmappedProp could not be matched
+            return new Target
+            {
+                TestString = source.TestString,
+                TestInt = source.TestInt,
+                TestEnum = MapSourceEnum(source.TestEnum),
+                TestChild = new TargetChild
+                {
+                    TestString = source.TestChild.TestString,
+                    TestInt = source.TestChild.TestInt
+                },
+                TestChildren = source.TestChildren.Select(sourcechildItem => new TargetChild
+                {
+                    TestString = sourcechildItem.TestString,
+                    TestInt = sourcechildItem.TestInt
+                }).ToList(),
+                TestChildrenSimpleType = source.TestChildrenSimpleType,
+                TestIntNullable = source.TestIntNullable ?? throw new ArgumentNullException(nameof(source.TestIntNullable))
+            };
+        }
+
+        public static TargetEnum MapSourceEnum(SourceEnum testenum)
+        {
+            switch (testenum)
+            {
+                case SourceEnum.None:
+                    return TargetEnum.None;
+                case SourceEnum.Test:
+                    return TargetEnum.Test;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(testenum));
+            }
+        }
+    }
+```
+
+Now we will be creating the logic for the mapping itself. 
+It starts with implementing the ComputeRefactoringsAsync method, this method receives the CodeRefactoringContext to which you are trying to make adjustments.
+To receive the actual SyntaxNode which you selected, you can use the GetSyntaxRootAsync method and from that root you can find the actual node with the FindNode method.
+
+```
+public sealed override async Task ComputeRefactoringsAsync(CodeRefactoringContext context)
+{
+    var root = await context.Document.GetSyntaxRootAsync(context.CancellationToken).ConfigureAwait(false);
+    var node = root.FindNode(context.Span);
+
+    ImplementRefactoringCommand(context, node);
+}
+```
+
+From here on out we can start adding our custom logic. Because we are making an rather dumb mapping method I added the logic to check if its a method with a return type and a single input parameter. If thats the case we can go further to create a mapping code action and register it to Visual Studio!
+
+The mapping itself contains a bit more complex logic. Because we are trying to create a mapper there is the potential for some recursion. For example it is possible that the root object contains a property which itself is a complex object which needs to be mapped. For this reason we create an object to hold these extra statements.
+Now for the next step we check what type the returntype and input type is. For example is it an Enum, is it a list or is it a standard complex object. 
+For now lets start with the easiest one; the complex object. In the case that it is a complex object we will get all the properties on the source.
+
+```
+var sourceProperties = source.GetMembers().Where(x => !x.IsStatic && !x.IsImplicitlyDeclared && x is IPropertySymbol && x.DeclaredAccessibility == Accessibility.Public).Cast<IPropertySymbol>().ToList();
+```
+
+In this case its important that the members we are working with are PropertySymbols and Public settable. The next step is creating the mapping, often there are two ways just use the public setters or use an constructor. For now I ignored the combination of these two flavours, to keep the code a bit more readable. 
+For now lets go with the flavour of setting the properties directly. The syntax of Roslyn dictates that the first step that we must do is declare the new object syntax. Using the target ITypeSymbol we can call the SyntaxGenerator to create a type expression, and with that create the [ObjectCreationExpression](https://learn.microsoft.com/en-us/dotnet/api/microsoft.codeanalysis.csharp.syntaxfactory.objectcreationexpression?view=roslyn-dotnet-4.3.0#microsoft-codeanalysis-csharp-syntaxfactory-objectcreationexpression(microsoft-codeanalysis-syntaxtoken-microsoft-codeanalysis-csharp-syntax-typesyntax-microsoft-codeanalysis-csharp-syntax-argumentlistsyntax-microsoft-codeanalysis-csharp-syntax-initializerexpressionsyntax)) on the [SyntaxFactory](https://learn.microsoft.com/en-us/dotnet/api/microsoft.codeanalysis.csharp.syntaxfactory?view=roslyn-dotnet-4.3.0). This step can also be done at a later stage but I prefer to do it in the beginning. Now the next step is creating the actual mapping. To do this we get the target member properties the same way we got the source properties. Now we try to match the target and the source properties. 
